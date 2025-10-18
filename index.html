@@ -228,6 +228,7 @@
       staff: "Staff",
       alreadyCheckedIn: "Already checked in",
       duplicateMsg: "This student has already checked in. Showing venue again.",
+      loadingRoster: "Loading roster.xlsx…",
       loadFail: "Could not load roster.xlsx in this folder. Start is disabled.",
       loadSuccess: "Roster loaded. Tap Start.",
     },
@@ -281,6 +282,7 @@
       staff: "職員",
       alreadyCheckedIn: "已簽到",
       duplicateMsg: "此學生已簽到，現再次顯示集合地點。",
+      loadingRoster: "正在載入 roster.xlsx…",
       loadFail: "未能載入 roster.xlsx，開始鍵已停用。",
       loadSuccess: "已載入名單，可按「開始」。",
     },
@@ -294,6 +296,7 @@
     roster: null, // { classes: { '1B': { odd:{venue,students}, even:{...} } } }
     picked: null, // { classId, number, label, group, venue }
     checkins: [],
+    rosterStatus: 'idle',
   };
 
   function loadCheckins(){ try{return JSON.parse(localStorage.getItem('f1.checkins')||'[]')}catch{return[]} }
@@ -388,17 +391,129 @@
     }
   }
 
+  function rosterStatusText(){
+    switch(state.rosterStatus){
+      case 'loading': return t('loadingRoster');
+      case 'success': return t('loadSuccess');
+      case 'fail': return t('loadFail');
+      default: return '';
+    }
+  }
+
   function updateStartAvailability(){
-    const btn = el('btnStart'); if(!btn) return;
+    const btn = el('btnStart');
+    const hasRoster = !!(state.roster && state.roster.classes && Object.keys(state.roster.classes).length);
+    if(btn){
+      btn.disabled = !hasRoster;
+    }
     const status = el('rosterStatus');
-    if(state.roster){
-        Object.keys(state.roster.classes).sort().forEach(c=>{
-          const opt = document.createElement('option'); opt.value=c; opt.textContent=c; sel.appendChild(opt);
+    if(status){
+      const text = rosterStatusText();
+      status.textContent = text;
+      status.classList.toggle('error', state.rosterStatus === 'fail');
+    }
+    const sel = el('selectClass');
+    if(sel){
+      const keep = sel.value;
+      sel.innerHTML = `<option value="">${t('choose')}</option>`;
+      if(hasRoster){
+        const classes = Object.keys(state.roster.classes).sort((a,b)=>a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' }));
+        classes.forEach(c=>{
+          const opt = document.createElement('option');
+          opt.value = c;
+          opt.textContent = c;
+          sel.appendChild(opt);
         });
-        if(Object.keys(state.roster.classes).includes(keep)) sel.value = keep;
-        populateStudentsUI();
+        if(classes.includes(keep)) sel.value = keep;
       }
     }
+    populateStudentsUI();
+  }
+
+  function applyLangButtonState(btn, active){
+    if(!btn) return;
+    btn.classList.toggle('primary', active);
+    btn.classList.toggle('secondary', !active);
+  }
+
+  function renderAll(){
+    document.documentElement.lang = state.lang;
+    document.title = t('appTitle');
+    setText('title', t('appTitle'));
+    setText('homeTitle', t('appTitle'));
+    setText('homeIntro', t('intro1'));
+    setText('langLabel', t('language'));
+    const btnEn = el('btnEn'); if(btnEn){ btnEn.textContent = t('english'); applyLangButtonState(btnEn, state.lang==='en'); }
+    const btnZh = el('btnZh'); if(btnZh){ btnZh.textContent = t('chinese'); applyLangButtonState(btnZh, state.lang==='zh'); }
+    setText('btnAdmin', t('staff'));
+    setText('btnStart', t('start'));
+    setText('labelSelectClass', t('selectClass'));
+    setText('modeNumber', t('classNo'));
+    setText('modeName', t('searchByName'));
+    setText('labelEnterNo', t('enterNumber'));
+    setText('btnConfirmByNo', t('confirmStudent'));
+    setText('labelStudentName', t('studentName'));
+    setText('labelParents', t('parentsAttending'));
+    setText('btnConfirmAttendance', t('confirmAttendance'));
+    setText('btnBack', t('back'));
+    setText('btnDoneBack', t('back'));
+    setText('btnDoneReset', t('reset'));
+    setText('doneTitle', t('attendanceConfirmed'));
+    setText('donePrompt', t('proceedToVenue'));
+    setText('adminTitle', t('admin'));
+    setText('labelPIN', t('adminPIN'));
+    setText('btnUnlock', t('unlock'));
+    setText('btnAdminBack', t('back'));
+    setText('adminOpenTitle', t('admin'));
+    setText('btnExport', t('exportCSV'));
+    setText('btnLock', t('lock'));
+    setText('labelTotalParents', t('totalParents'));
+    setText('labelTotalFamilies', t('totalFamilies'));
+    const optChoose = el('optChoose'); if(optChoose){ optChoose.textContent = t('choose'); }
+    const optStudentChoose = el('optStudentChoose'); if(optStudentChoose){ optStudentChoose.textContent = t('chooseStudent'); }
+    updateStartAvailability();
+    updatePickedCard();
+    refreshAdmin();
+  }
+
+  function setLang(lang){
+    if(!I18N[lang]) return;
+    state.lang = lang;
+    localStorage.setItem('f1.lang', lang);
+    renderAll();
+  }
+
+  async function tryAutoLoad(){
+    const params = new URLSearchParams(window.location.search);
+    const rosterParam = params.get('roster');
+    if(!rosterParam && state.roster){
+      state.rosterStatus = 'success';
+      renderAll();
+      return;
+    }
+    const attempts = [];
+    if(rosterParam){ attempts.push(rosterParam); }
+    attempts.push('roster.xlsx');
+    for(const url of attempts){
+      try {
+        const data = await loadRosterFromUrl(url);
+        if(data){
+          state.roster = data;
+          state.rosterStatus = 'success';
+          try { localStorage.setItem('f1.roster', JSON.stringify(data)); } catch (e) { console.warn('store roster failed', e); }
+          renderAll();
+          return;
+        }
+      } catch (e) {
+        console.warn('Roster load failed for', url, e);
+      }
+    }
+    if(!state.roster){
+      state.rosterStatus = 'fail';
+    } else {
+      state.rosterStatus = 'success';
+    }
+    renderAll();
   }
 
   function suggestionsFor(cls, query){
@@ -484,6 +599,7 @@
     }
     const record = { ts: Date.now(), classId:c.classId, number:c.number, name:c.label, group:c.group, venue:c.venue, parents: Math.max(1, p), lang: state.lang };
     const list = loadCheckins(); list.push(record); saveCheckins(list);
+    refreshAdmin();
     state.picked = null; const cp=el('cardPicked'); if(cp) cp.classList.add('hidden');
     setText('doneTitle', t('attendanceConfirmed'));
     setText('doneSub', `${t('student')}: ${record.name} (${record.classId} #${record.number}) • ${t('group')}: ${record.group==='odd'?t('odd'):t('even')}`);
@@ -557,12 +673,6 @@
       const n = Number(val);
       const res = findByNumber(cls, n);
       if(res){ state.picked = res; const cd=el('cardDone'); if(cd) cd.classList.add('hidden'); updatePickedCard(); }
-    }); const cls = sel? sel.value : ''; const q = inputName.value; const root = el('suggestions'); if(root) root.innerHTML='';
-      suggestionsFor(cls, q).forEach(s=>{
-        const b=document.createElement('button'); b.className='secondary'; b.textContent = displayLabel(s); b.addEventListener('click',()=>{
-          const res = findByName(cls, s.display_name||s.en_name||s.ch_name); if(res){ state.picked=res; const cd=el('cardDone'); if(cd) cd.classList.add('hidden'); updatePickedCard(); }
-        }); if(root) root.appendChild(b);
-      });
     });
 
     const btnConfirmAttendance = el('btnConfirmAttendance'); if(btnConfirmAttendance) btnConfirmAttendance.addEventListener('click', confirmAttendance);
@@ -587,14 +697,13 @@
   });
 
     // init from storage
-    try{ const r = JSON.parse(localStorage.getItem('f1.roster')||'null'); if(r) state.roster=r; }catch{}
+    try{ const r = JSON.parse(localStorage.getItem('f1.roster')||'null'); if(r){ state.roster=r; state.rosterStatus='success'; } }catch{}
+    const params = new URLSearchParams(window.location.search);
+    const needFetch = !!params.get('roster') || !state.roster;
+    if(needFetch){ state.rosterStatus = 'loading'; }
     renderAll(); show('Home');
-    // show loading indicator
-    setText('rosterStatus', 'Loading roster.xlsx…');
     (async () => {
       await tryAutoLoad();
-      if(state.roster){ setText('rosterStatus', t('loadSuccess')); }
-      else { setText('rosterStatus', t('loadFail')); }
     })();
 
     // ====== Lightweight self-tests (console only) ======
