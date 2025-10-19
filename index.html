@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>F1 Growth Celebration – Self Check‑in</title>
+  <title>F1 Growth Celebration – Self Check-in</title>
   <meta name="theme-color" content="#ffffff" />
   <style>
     :root{
@@ -214,7 +214,7 @@
       loadJSON: "Upload JSON",
       loadSample: "Load sample data",
       setupTitle: "Setup: Load roster",
-      setupDesc: "This app will try to auto‑load your roster from ./roster.xlsx (or use ?roster=<url>). You can also upload the Excel with a 'roster' sheet (columns: class, number, en_name, ch_name, group, venue, parents_expected). Data is stored locally on this device only.",
+      setupDesc: "This app will try to auto-load your roster from ./roster.xlsx (or use ?roster=<url>). You can also upload the Excel with a 'roster' sheet (columns: class, number, en_name, ch_name, group, venue, parents_expected). Data is stored locally on this device only.",
       continue: "Continue",
       qrPoster: "QR poster",
       appLink: "App link",
@@ -337,6 +337,8 @@
   }
   function renderAll(){
     setText('title', t('appTitle'));
+    setText('homeTitle', t('appTitle'));
+    setText('homeIntro', t('intro1'));
     setText('langLabel', t('language'));
     setText('btnAdmin', t('staff'));
     // flow labels
@@ -395,21 +397,49 @@
     return hasCH ? String(stu.ch_name) : String(stu.en_name||'');
   }
 
+  // Robust header + value normalization (fixes iPhone/Safari Excel header issues)
   function normalizeRow(r){
-    const cls = String(r.class||r.Class||'').trim();
-    const number = Number(r.number||r.Number||r.no||r.No||0);
-    // names
-    const en = String(r.en_name||r.enName||r.EN_NAME||r.English||r.english||r.name_en||'').trim();
-    const ch = String(r.ch_name||r.chName||r.CH_NAME||r.chinese||r.name_ch||'').trim();
-    const gRaw = String(r.group||r.Group||'').toLowerCase();
+    // Local helpers to avoid Safari/iOS quirks with NBSP and regex
+    const NBSP_CHAR = String.fromCharCode(160); // NBSP
+    const normalizeKey = k => String(k||'')
+      .toLowerCase()
+      .split(NBSP_CHAR).join(' ')
+      .replace(/\s+|_/g,'')
+      .trim();
+    const pickAny = (obj, candidates)=>{
+      if(!obj) return undefined;
+      const map = new Map();
+      for(const key of Object.keys(obj)) map.set(normalizeKey(key), key);
+      for(const c of candidates){ const nk = normalizeKey(c); if(map.has(nk)) return obj[map.get(nk)]; }
+      return undefined;
+    };
+    const toStr = v => String(v==null? '': v).split(NBSP_CHAR).join(' ').trim();
+
+    // Class & number
+    const cls = toStr(pickAny(r, ['class','Class','CLASS']));
+    const numberRaw = pickAny(r, ['number','Number','no','No','NO','class_no','classno']);
+    const number = Number(numberRaw||0);
+
+    // Names (tolerate many header variants & hidden NBSP/space issues)
+    const en = toStr(pickAny(r, [
+      'en_name','enName','EN_NAME','english','English','english_name','englishname',
+      'name_en','student_english','studentenglish','English Name'
+    ]));
+    const ch = toStr(pickAny(r, [
+      'ch_name','chName','CH_NAME','chinese','Chinese','chinesename','chinese_name',
+      'name_ch','chi_name','student_chinese','studentchinese','中文姓名','CH Name'
+    ]));
+
+    // Group & venue
+    const gRaw = toStr(pickAny(r, ['group','Group'])).toLowerCase();
     const group = gRaw.includes('odd') ? 'odd' : gRaw.includes('even') ? 'even' : (number%2? 'odd':'even');
-    const venue = String(r.venue||r.Venue||'').trim();
-    // expected parents (support several header variants)
-    const parents = Number(
-      r.parents_expected||r.expected_parents||r.parents||
-      r.no_of_parents||r.parents_coming||r.parent_count||r.ParentCount||r.Parents||0
-    );
-    return { cls, number, en_name: en, ch_name: ch, group, venue, parents_expected: (Number.isFinite(parents) && parents>0) ? parents : 0 };
+    const venue = toStr(pickAny(r, ['venue','Venue','room','Room','classroom']));
+
+    // Expected parents
+    const parentsRaw = pickAny(r, ['parents_expected','expected_parents','parents','no_of_parents','parents_coming','parent_count','ParentCount','Parents','Expected Parents']);
+    const parentsNum = Number(parentsRaw||0);
+
+    return { cls, number, en_name: en, ch_name: ch, group, venue, parents_expected: (Number.isFinite(parentsNum) && parentsNum>0) ? parentsNum : 0 };
   }
 
   function buildData(rows){
@@ -669,6 +699,17 @@
       // Suggestions API (still present) - English & Traditional
       console.assert(suggestionsFor('1B','A').length===1, 'suggestionsFor English');
       console.assert(suggestionsFor('1B','甲').length===1, 'suggestionsFor Traditional');
+
+      // Robust header normalization tests (spaces/case/NBSP)
+      const weirdRows = [
+        { 'Class ': '1C', 'English Name':'E EN', 'CH Name':'丙丙', 'Number ': 5, 'Venue':'C12', 'Expected Parents': 2 },
+        { 'CLASS': '1C', 'English Name':'F EN', '中文姓名':'丁丁', 'NO': 6, 'room':'C13', 'parent_count': 1 },
+      ];
+      const prevRoster2 = state.roster; state.roster = buildData(weirdRows);
+      renderAll(); const selClass2 = el('selectClass'); if(selClass2){ selClass2.value='1C'; }
+      populateStudentsUI(); const ss2 = el('selectStudent'); console.assert(ss2 && ss2.options.length>=3, 'dropdown options for weird headers (>=2 + placeholder)');
+      const r5 = findByNumber('1C',5); console.assert(r5 && r5.label.includes('E EN') && r5.label.includes('丙丙'), 'label from weird headers (English+Chinese)');
+
       const prevCheck = loadCheckins();
       saveCheckins([]);
       console.assert(hasCheckedIn('1B',1)===false, 'hasCheckedIn pre');
@@ -676,7 +717,7 @@
       console.assert(hasCheckedIn('1B',1)===true, 'hasCheckedIn true');
       console.assert(hasCheckedIn('1B',2)===false, 'hasCheckedIn other false');
       console.assert(setText('_missing_', 'x')===false, 'setText missing element');
-      // Start disabled state when no roster
+      // Start disabled state when no roster (button removed; just ensure no crash)
       state.roster = null; updateStartAvailability(); const startBtn = el('btnStart'); console.assert(startBtn ? startBtn.disabled===true : true, 'start disabled without roster');
       // CJK t<->s variant tests (only if OpenCC available)
       if (window.OpenCC && typeof OpenCC.Converter === 'function') {
