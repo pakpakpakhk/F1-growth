@@ -36,7 +36,28 @@
   .foot{padding:28px;text-align:center;color:var(--muted);font-size:12px}
   @media (min-width:700px){.two{grid-template-columns:1fr 1fr}}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Excel library with CDN → local fallback -->
+<script>
+(function(){
+  function inject(src, onload){
+    var s=document.createElement('script');
+    s.src=src; s.defer=true;
+    s.onload=onload;
+    s.onerror=function(){
+      console.warn('Failed to load', src);
+      var eb=document.getElementById('errorBanner');
+      if(eb){ eb.classList.remove('hidden'); eb.textContent='Error loading '+src; }
+    };
+    document.head.appendChild(s);
+  }
+  // Try CDN first; fall back to local file
+  inject('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function(){ window.__xlsxReady=true; });
+  setTimeout(function(){
+    if(!window.__xlsxReady){ inject('./xlsx.full.min.js', function(){ window.__xlsxReady=true; }); }
+  }, 1200);
+})();
+</script>
+
 </head>
 <body>
 <header>
