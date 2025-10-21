@@ -91,7 +91,16 @@
     <div id="alreadyWarn" class="chip danger hidden"></div>
     <div>
       <label id="labelParents">No. of parents attending</label>
-      <input id="inputParents" inputmode="numeric" pattern="[0-9]*" value="1"/>
+      <input
+  id="inputParents"
+  type="number"
+  inputmode="numeric"
+  pattern="[0-9]*"
+  min="1"
+  max="4"
+  step="1"
+  value="1"
+  oninput="var v=parseInt(this.value||'1',10); if(isNaN(v)) v=1; if(v<1) v=1; if(v>4) v=4; this.value=v;">
     </div>
     <div class="row" style="gap:10px;flex-wrap:wrap">
       <button id="btnConfirmAttendance" class="primary">Confirm attendance</button>
@@ -276,7 +285,7 @@ function updatePickedCard(){
 }
 
 function confirmAttendance(){
-  var p=Math.max(1, Number((el('inputParents')&&el('inputParents').value)||1));
+  var p = Math.min(4, Math.max(1, parseInt((el('inputParents') && el('inputParents').value) || '1', 10) || 1));
   var c=state.picked; if(!c) return;
   var record={ ts:Date.now(), classId:c.classId, number:c.number, name:c.label, group:c.group, venue:c.venue, parents:p, lang:state.lang };
   // Send to cloud first
